@@ -20,11 +20,18 @@ repositories {
 }
 
 dependencies {
+    // spring
     implementation("org.springframework.boot:spring-boot-starter-amqp")
     implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
     implementation("org.springframework.boot:spring-boot-starter-web")
+
+    // jackson
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+
+    // kotlin
     implementation("org.jetbrains.kotlin:kotlin-reflect")
+
+    // test
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     testImplementation("org.springframework.amqp:spring-rabbit-test")
