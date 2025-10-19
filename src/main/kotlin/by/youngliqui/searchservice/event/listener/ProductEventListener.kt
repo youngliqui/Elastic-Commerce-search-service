@@ -19,13 +19,20 @@ class ProductEventListener(
     }
 
     @RabbitListener(queues = [QUEUE_NAME])
-    fun handleProductEvent(event: Any) {
-        log.info("Получено событие: $event")
-        when (event) {
-            is ProductCreatedEvent -> indexingService.indexProduct(event.product)
-            is ProductUpdatedEvent -> indexingService.indexProduct(event.product)
-            is ProductDeletedEvent -> indexingService.deleteProductById(event.id)
-            else -> log.warn("Получен неизвестный тип события: ${event::class.java.name}")
-        }
+    fun handleProductCreated(event: ProductCreatedEvent) {
+        log.info("Получено событие ProductCreatedEvent: $event")
+        indexingService.indexProduct(event.product)
+    }
+
+    @RabbitListener(queues = [QUEUE_NAME])
+    fun handleProductUpdated(event: ProductUpdatedEvent) {
+        log.info("Получено событие ProductUpdatedEvent: $event")
+        indexingService.indexProduct(event.product)
+    }
+
+    @RabbitListener(queues = [QUEUE_NAME])
+    fun handleProductDeleted(event: ProductDeletedEvent) {
+        log.info("Получено событие ProductDeletedEvent: $event")
+        indexingService.deleteProductById(event.id)
     }
 }
