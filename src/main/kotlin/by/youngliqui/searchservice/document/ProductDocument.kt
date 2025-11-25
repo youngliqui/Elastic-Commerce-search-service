@@ -11,10 +11,10 @@ data class ProductDocument(
     @Id
     val id: UUID,
 
-    @Field(type = FieldType.Text)
+    @Field(type = FieldType.Text, analyzer = "standard")
     val name: String,
 
-    @Field(type = FieldType.Text)
+    @Field(type = FieldType.Text, analyzer = "standard")
     val description: String?,
 
     @Field(type = FieldType.Keyword)

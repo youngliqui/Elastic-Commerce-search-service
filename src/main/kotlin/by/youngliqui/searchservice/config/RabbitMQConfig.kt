@@ -5,7 +5,9 @@ import by.youngliqui.searchservice.event.dto.ProductDeletedEvent
 import by.youngliqui.searchservice.event.dto.ProductUpdatedEvent
 import org.springframework.amqp.core.Binding
 import org.springframework.amqp.core.BindingBuilder
+import org.springframework.amqp.core.DirectExchange
 import org.springframework.amqp.core.Queue
+import org.springframework.amqp.core.QueueBuilder
 import org.springframework.amqp.core.TopicExchange
 import org.springframework.amqp.rabbit.connection.ConnectionFactory
 import org.springframework.amqp.rabbit.core.RabbitTemplate
@@ -22,19 +24,40 @@ class RabbitMQConfig {
         const val EXCHANGE_NAME = "products.exchange"
         const val QUEUE_NAME = "product.events.queue"
         const val ROUTING_KEY_PREFIX = "products.event"
+
+        const val DLQ_EXCHANGE_NAME = "products.exchange.dlq"
+        const val DLQ_QUEUE_NAME = "product.events.queue.dlq"
+        const val DLQ_ROUTING_KEY = "products.event.dlq"
     }
 
     @Bean
     fun productsExchange(): TopicExchange = TopicExchange(EXCHANGE_NAME)
 
     @Bean
-    fun productEventsQueue(): Queue = Queue(QUEUE_NAME)
+    fun dlqExchange(): DirectExchange = DirectExchange(DLQ_EXCHANGE_NAME)
 
     @Bean
-    fun binding(queue: Queue, exchange: TopicExchange): Binding =
-        BindingBuilder.bind(queue)
-            .to(exchange)
+    fun productEventsQueue(): Queue {
+        return QueueBuilder.durable(QUEUE_NAME)
+            .withArgument("x-dead-letter-exchange", DLQ_EXCHANGE_NAME)
+            .withArgument("x-dead-letter-routing-key", DLQ_ROUTING_KEY)
+            .build()
+    }
+
+    @Bean
+    fun dlqQueue(): Queue = QueueBuilder.durable(DLQ_QUEUE_NAME).build()
+
+    @Bean
+    fun mainBinding(): Binding =
+        BindingBuilder.bind(productEventsQueue())
+            .to(productsExchange())
             .with("$ROUTING_KEY_PREFIX.#")
+
+    @Bean
+    fun dlqBinding(): Binding =
+        BindingBuilder.bind(dlqQueue())
+            .to(dlqExchange())
+            .with(DLQ_ROUTING_KEY)
 
     @Bean
     fun classMapper(): DefaultClassMapper {
@@ -66,7 +89,6 @@ class RabbitMQConfig {
         val rabbitTemplate = RabbitTemplate(connectionFactory)
         configurer.configure(rabbitTemplate, connectionFactory)
         rabbitTemplate.messageConverter = messageConverter
-        rabbitTemplate.setExchange(EXCHANGE_NAME)
         return rabbitTemplate
     }
 }
