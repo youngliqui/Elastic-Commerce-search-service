@@ -1,8 +1,9 @@
 plugins {
-    kotlin("jvm") version "1.9.25"
-    kotlin("plugin.spring") version "1.9.25"
-    id("org.springframework.boot") version "3.5.6"
-    id("io.spring.dependency-management") version "1.1.7"
+    val kotlinVersion = "1.9.25"
+    kotlin("jvm") version kotlinVersion
+    kotlin("plugin.spring") version kotlinVersion
+    id("org.springframework.boot") version "3.3.5"
+    id("io.spring.dependency-management") version "1.1.6"
 }
 
 group = "by.youngliqui"
@@ -20,21 +21,19 @@ repositories {
 }
 
 dependencies {
-    // spring
-    implementation("org.springframework.boot:spring-boot-starter-amqp")
-    implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
+    // Spring Boot Core
     implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-data-elasticsearch")
+    implementation("org.springframework.boot:spring-boot-starter-amqp")
 
-    // Swagger
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5")
-
-    // jackson
+    // JSON & Kotlin Utils
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
-
-    // kotlin
     implementation("org.jetbrains.kotlin:kotlin-reflect")
 
-    // test
+    // Documentation (Swagger/OpenAPI)
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
+
+    // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     testImplementation("org.springframework.amqp:spring-rabbit-test")

@@ -5,11 +5,20 @@ import by.youngliqui.searchservice.api.dto.FacetValue
 import by.youngliqui.searchservice.api.dto.ProductSearchResponse
 import by.youngliqui.searchservice.api.dto.SearchRequest
 import by.youngliqui.searchservice.document.ProductDocument
+import co.elastic.clients.elasticsearch._types.FieldValue
+import co.elastic.clients.elasticsearch._types.aggregations.Aggregation
+import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery
+import co.elastic.clients.elasticsearch._types.query_dsl.Operator
+import co.elastic.clients.elasticsearch._types.query_dsl.Query
+import co.elastic.clients.elasticsearch._types.query_dsl.QueryBuilders
+import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType
+import co.elastic.clients.json.JsonData
+import org.slf4j.LoggerFactory
 import org.springframework.data.domain.Pageable
+import org.springframework.data.elasticsearch.client.elc.ElasticsearchAggregations
+import org.springframework.data.elasticsearch.client.elc.NativeQuery
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations
 import org.springframework.data.elasticsearch.core.SearchHits
-import org.springframework.data.elasticsearch.core.query.Criteria
-import org.springframework.data.elasticsearch.core.query.CriteriaQuery
 import org.springframework.stereotype.Service
 
 @Service
@@ -17,148 +26,106 @@ class SearchServiceImpl(
     private val elasticsearchOperations: ElasticsearchOperations
 ) : SearchService {
 
+    private val log = LoggerFactory.getLogger(javaClass)
+
     override fun searchProducts(request: SearchRequest, pageable: Pageable): ProductSearchResponse {
-        // 1. Строим критерии поиска
-        val criteria = buildSearchCriteria(request)
-        val query = CriteriaQuery(criteria, pageable)
-
-        // 2. Выполняем поиск
-        val searchHits: SearchHits<ProductDocument> = elasticsearchOperations.search(query, ProductDocument::class.java)
-
-        // 3. Получаем фасеты через отдельные запросы
-        val facets = buildFacets(request)
-
-        // 4. Строим ответ
-        return buildSearchResponse(searchHits, pageable, facets)
-    }
-
-    /**
-     * Строит критерии поиска на основе запроса
-     */
-    private fun buildSearchCriteria(request: SearchRequest): Criteria {
-        val criteria = Criteria()
-
-        request.query?.takeIf { it.isNotBlank() }?.let { query ->
-            criteria.and(
-                Criteria("name").matches(query)
-                    .or("description").matches(query)
-                    .or("brand").matches(query)
-                    .or("category").matches(query)
-            )
-        }
-
-        request.brands?.takeIf { it.isNotEmpty() }?.let { brands ->
-            criteria.and(Criteria("brand").`in`(brands))
-        }
-
-        request.categories?.takeIf { it.isNotEmpty() }?.let { categories ->
-            criteria.and(Criteria("category").`in`(categories))
-        }
-
-        if (request.priceFrom != null || request.priceTo != null) {
-            val priceCriteria = Criteria("price")
-            request.priceFrom?.let { priceCriteria.greaterThanEqual(it) }
-            request.priceTo?.let { priceCriteria.lessThanEqual(it) }
-            criteria.and(priceCriteria)
-        }
-
-        return criteria
-    }
-
-    /**
-     * Строит фасеты через отдельные агрегационные запросы
-     */
-    private fun buildFacets(request: SearchRequest): List<Facet> {
-        val facets = mutableListOf<Facet>()
-
-        val brandsFacet = getBrandFacet(request)
-        facets.add(brandsFacet)
-
-        val categoriesFacet = getCategoryFacet(request)
-        facets.add(categoriesFacet)
-
-        return facets
-    }
-
-    /**
-     * Получает фасет по брендам
-     */
-    private fun getBrandFacet(request: SearchRequest): Facet {
-        val criteria = buildBaseCriteriaForFacets(request)
-        val query = CriteriaQuery(criteria)
-
+        val query = buildNativeQuery(request, pageable)
         val searchHits = elasticsearchOperations.search(query, ProductDocument::class.java)
-
-        val brandCounts = searchHits.searchHits
-            .map { it.content.brand }
-            .groupingBy { it }
-            .eachCount()
-
-        val facetValues = brandCounts.map { (brand, count) ->
-            FacetValue(brand, count.toLong())
-        }.sortedByDescending { it.count }
-
-        return Facet("brand", facetValues)
+        return mapToResponse(searchHits, pageable)
     }
 
-    /**
-     * Получает фасет по категориям
-     */
-    private fun getCategoryFacet(request: SearchRequest): Facet {
-        val criteria = buildBaseCriteriaForFacets(request)
-        val query = CriteriaQuery(criteria)
+    private fun buildNativeQuery(request: SearchRequest, pageable: Pageable): NativeQuery {
+        val builder = NativeQuery.builder()
+            .withQuery(buildBoolQuery(request))
+            .withPageable(pageable)
 
-        val searchHits = elasticsearchOperations.search(query, ProductDocument::class.java)
+        // Агрегации (фасеты)
+        builder.withAggregation("brands_facet", createTermAggregation("brand"))
+        builder.withAggregation("categories_facet", createTermAggregation("category"))
 
-        val categoryCounts = searchHits.searchHits
-            .map { it.content.category }
-            .groupingBy { it }
-            .eachCount()
-
-        val facetValues = categoryCounts.map { (category, count) ->
-            FacetValue(category, count.toLong())
-        }.sortedByDescending { it.count }
-
-        return Facet("category", facetValues)
+        return builder.build()
     }
 
-    /**
-     * Строит базовые критерии для фасетов (без учета фильтров по самому фасету)
-     */
-    private fun buildBaseCriteriaForFacets(request: SearchRequest): Criteria {
-        val criteria = Criteria()
+    private fun buildBoolQuery(request: SearchRequest): Query {
+        return QueryBuilders.bool { b ->
+            // 1. Полнотекстовый поиск
+            request.query?.takeIf { it.isNotBlank() }?.let { q ->
+                b.must(createMultiMatchQuery(q))
+            }
 
-        request.query?.takeIf { it.isNotBlank() }?.let { query ->
-            criteria.and(
-                Criteria("name").matches(query)
-                    .or("description").matches(query)
-                    .or("brand").matches(query)
-                    .or("category").matches(query)
-            )
+            // 2. Фильтры
+            applyFilters(b, request)
+            b
+        }
+    }
+
+    private fun createMultiMatchQuery(searchText: String): Query {
+        return QueryBuilders.multiMatch { mm ->
+            mm.query(searchText)
+                .fields("name^3", "description")
+                .fuzziness("AUTO")
+                .operator(Operator.And)
+                .type(TextQueryType.BestFields)
+        }
+    }
+
+    private fun applyFilters(b: BoolQuery.Builder, request: SearchRequest) {
+        // Фильтр: Бренды
+        if (!request.brands.isNullOrEmpty()) {
+            b.filter { f ->
+                f.terms { t ->
+                    t.field("brand")
+                        .terms { v -> v.value(request.brands.map { FieldValue.of(it) }) }
+                }
+            }
         }
 
-        // Фильтрация по цене
+        // Фильтр: Категории
+        if (!request.categories.isNullOrEmpty()) {
+            b.filter { f ->
+                f.terms { t ->
+                    t.field("category")
+                        .terms { v -> v.value(request.categories.map { FieldValue.of(it) }) }
+                }
+            }
+        }
+
+        // Фильтр: Цена
         if (request.priceFrom != null || request.priceTo != null) {
-            val priceCriteria = Criteria("price")
-            request.priceFrom?.let { priceCriteria.greaterThanEqual(it) }
-            request.priceTo?.let { priceCriteria.lessThanEqual(it) }
-            criteria.and(priceCriteria)
+            b.filter { f ->
+                f.range { r ->
+                    r.field("price")
+                    // Используем JsonData.of() для совместимости с API 8.x
+                    request.priceFrom?.let { r.gte(JsonData.of(it)) }
+                    request.priceTo?.let { r.lte(JsonData.of(it)) }
+                    r
+                }
+            }
         }
-
-        return criteria
     }
 
-    /**
-     * Строит финальный ответ
-     */
-    private fun buildSearchResponse(
+    private fun createTermAggregation(fieldName: String): Aggregation {
+        return Aggregation.of { a ->
+            a.terms { t -> t.field(fieldName).size(20) }
+        }
+    }
+
+    private fun mapToResponse(
         searchHits: SearchHits<ProductDocument>,
-        pageable: Pageable,
-        facets: List<Facet>
+        pageable: Pageable
     ): ProductSearchResponse {
         val products = searchHits.searchHits.map { it.content }
         val totalElements = searchHits.totalHits
-        val totalPages = calculateTotalPages(totalElements, pageable.pageSize)
+        val totalPages = if (pageable.pageSize > 0)
+            ((totalElements + pageable.pageSize - 1) / pageable.pageSize).toInt()
+        else 1
+
+        val aggregations = searchHits.aggregations as? ElasticsearchAggregations
+
+        val facets = listOf(
+            Facet("brand", extractFacetValues(aggregations, "brands_facet")),
+            Facet("category", extractFacetValues(aggregations, "categories_facet"))
+        )
 
         return ProductSearchResponse(
             content = products,
@@ -170,14 +137,22 @@ class SearchServiceImpl(
         )
     }
 
-    /**
-     * Вычисляет общее количество страниц
-     */
-    private fun calculateTotalPages(totalElements: Long, pageSize: Int): Int {
-        return if (pageSize > 0) {
-            ((totalElements + pageSize - 1) / pageSize).toInt()
-        } else {
-            1
+    private fun extractFacetValues(
+        aggregations: ElasticsearchAggregations?,
+        facetName: String
+    ): List<FacetValue> {
+        if (aggregations == null) return emptyList()
+
+        val elasticAgg = aggregations.get(facetName) ?: return emptyList()
+        val aggregate = elasticAgg.aggregation().aggregate
+
+        if (!aggregate.isSterms) return emptyList()
+
+        return aggregate.sterms().buckets().array().map { bucket ->
+            FacetValue(
+                value = bucket.key().stringValue(),
+                count = bucket.docCount()
+            )
         }
     }
 }
