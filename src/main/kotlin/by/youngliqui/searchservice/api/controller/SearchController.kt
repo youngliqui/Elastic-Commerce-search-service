@@ -5,7 +5,6 @@ import by.youngliqui.searchservice.api.dto.SearchRequest
 import by.youngliqui.searchservice.service.SearchService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
-import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
 import org.springframework.data.web.PageableDefault

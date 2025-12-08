@@ -1,10 +1,10 @@
 package by.youngliqui.searchservice.document
 
+import java.util.*
 import org.springframework.data.annotation.Id
 import org.springframework.data.elasticsearch.annotations.Document
 import org.springframework.data.elasticsearch.annotations.Field
 import org.springframework.data.elasticsearch.annotations.FieldType
-import java.util.UUID
 
 @Document(indexName = "products")
 data class ProductDocument(
